@@ -1,0 +1,104 @@
+# ============================================================
+#  迷你平衡车 — Git 忽略规则
+#  第三方来源与版权说明见 THIRD_PARTY_NOTICES.md
+# ============================================================
+
+
+# ---------- 第一部分：一定要忽略 ----------
+
+# --- Keil MDK 编译产物 ---
+Objects/
+Listings/
+DebugConfig/
+
+# --- 命令行验证构建产物（tools/compile.ps1 + tools/link.ps1）---
+build/
+.probe/
+_old_drivers_reference/
+*.o
+*.d
+*.crf
+*.dep
+*.axf
+*.elf
+*.hex
+*.bin
+*.lnp
+*.map
+*.lst
+*.sct
+*.htm
+*.iex
+*.plg
+*.scvd
+*.bak
+JLinkLog.txt
+JLinkSettings.ini
+
+# --- Keil 图形界面配置（含 Windows 用户名，不要提交）---
+*.uvguix.*
+
+# --- 编辑器 / IDE 日志与本地配置 ---
+.vscode/uv4.log.lock
+.vscode/keil-assistant.log
+*.log
+.claude/
+.idea/
+
+# --- 操作系统垃圾文件 ---
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# --- 商业字体（版权风险最高，绝对不要上传）---
+# 汉仪劲楷 / 华文行楷 / 华文仿宋 / 等线 / 黑体 均为商业授权字体
+my_lib/font/
+*.ttf
+*.TTF
+*.otf
+
+# --- 第三方二进制工具（既是他人版权，也不该把 exe/dll 放进仓库）---
+# ttf2c.exe / bdf2c.exe / otf2bdf.exe / ttf2c.core.dll 都在 my_lib/font/ 下
+*.exe
+*.dll
+
+# --- 江协科技的平衡车控制板原理图（著作权归江协科技所有，不要上传）---
+schematic.png
+
+
+# ---------- 第二部分：已废弃的第三方驱动（当前状态说明）----------
+#
+# 【现状】底层驱动已全部自研化，见 bsp/。
+# 铁头山羊的旧驱动文件（下面这份清单）目前**仍物理留在 my_lib/ 下**：
+# 删除它们的操作在当前环境被文件权限挡住了（不是权限配错，是会话沙箱
+# 不允许删除既有文件）。
+#
+# 它们**已经不在 git 里**：
+#   - 已从 template.uvprojx 的 my_lib 组移除，不参与编译；
+#   - 已从 git 索引移除，新提交里不含这些文件；
+#   - 由 bsp/ 下同名接口的自研实现完全替代，接口名保持不变。
+#
+# 想彻底清掉：直接删除 my_lib/ 下这些文件即可，删完不需要改任何代码：
+# --- 铁头山羊的旧驱动源码（未附带开源许可证，默认保留所有权利）---
+# my_lib/oled.c
+# my_lib/oled.h
+# my_lib/oled_font.h
+# my_lib/oled_default_font.h
+# my_lib/si2c.c
+# my_lib/si2c.h
+# my_lib/i2c.c
+# my_lib/i2c.h
+# my_lib/spi.c
+# my_lib/spi.h
+# my_lib/delay.c
+# my_lib/delay.h
+# my_lib/qmath.c
+# my_lib/qmath.h
+# my_lib/usart.c
+# my_lib/usart.h
+# my_lib/str_cmd.c
+# my_lib/str_cmd.h
+# my_lib/font/
+
+# --- 说明：my_lib/task.* / pid.* / button.* 是本项目自己编写的，
+#     这三个一直都在正常提交，不要加进忽略列表。---
