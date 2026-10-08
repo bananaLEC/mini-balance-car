@@ -1,5 +1,5 @@
 #include "app_mpu6050.h"
-#include "bsp_i2c.h"
+#include "bsp_si2c.h"
 #include "bsp_delay.h"
 #include "bsp_usart.h"
 
@@ -11,19 +11,37 @@
 /* MPU6050 的 I2C 从机地址（左对齐），AD0 接地就是 0xd0 */
 #define MPU6050_ADDR               0xd0
 
-/* I2C 读失败恢复策略：连续失败 >= MPU6050_FAIL_LIMIT 次则 App_MPU6050_IsOk() 返回 0，
- * 平衡环必须停机；失败期间每 MPU6050_RECOVER_MS 毫秒用 My_I2C_ResetBus 抢救一次总线；
- * 成功读到一帧即清零计数。姿态角由陀螺积分而来，一直拿同一个旧样本积分会越跑越偏，
- * 此时宁可停车也不能继续驱动电机（5ms 一周期，3 次才 15ms，已经很宽松）。 */
+/* ---------- 软件 I2C 参数 ----------
+ * MPU6050 挂在 PB10(SCL) / PB11(SDA)，与原来硬件 I2C2 用的引脚相同，
+ * 接线一根都不用动 —— 只是改成用 GPIO 打时序。
+ *
+ * 半周期取 3us（约 166kHz）。MPU6050 支持到 400kHz，3us 有充足余量；
+ * 一轮 14 字节读取约 14*9*2*3us ≈ 0.76ms，占 5ms 控制周期约 15%。
+ * ⚠️ 别往小调：半周期直接换算成 CPU 占用；而且线长、上拉不够时速率越高越容易出错。 */
+#define MPU6050_SI2C_HALF_US    (3u)
+
+static SI2C_TypeDef mpu_si2c = {GPIOB, GPIO_Pin_10, GPIOB, GPIO_Pin_11, MPU6050_SI2C_HALF_US};
+
+/* I2C 读失败恢复策略：
+ *   连续失败 >= MPU6050_FAIL_LIMIT 次 -> App_MPU6050_IsOk() 返回 0，
+ *   平衡环立刻切断电机输出（这一点不能松：姿态角靠陀螺积分，一直拿同一个旧样本
+ *   积分会越跑越偏，用错数据驱动电机比停车危险得多）。
+ *   但**不再永久停机**：只要重新读到有效帧，IsOk() 自动恢复 1，平衡环接着跑。
+ *   原来只要连续 3 次（15ms）失败就永久停机，偶发丢包会让车必然躺下，太脆。
+ *   软件 I2C 不会「外设卡死」，所以失败通常只是这一帧没读上，下一帧自然重来。 */
 #define MPU6050_FAIL_LIMIT      (3u)
-#define MPU6050_RECOVER_MS      (200u)
 
 static float ax, ay, az;
 static float temperature;
 static float gx, gy, gz;
 
 static uint8_t  mpu_fail_cnt = 0u;      //I2C 连续读失败次数
-static uint32_t mpu_recover_ms = 0u;    //上次抢救总线的时刻
+
+/* 【诊断】I2C 读失败的现场快照。
+ *   失败是「传感器失效」的直接原因，要知道是哪一种才好修：
+ *   从机不应答(-1)、数据被拒(-2)、还是从机拉死 SCL(-3) */
+static int      mpu_dbg_err    = 0;     //最后一次失败的返回值（-1/-2/-3）
+static uint16_t mpu_dbg_fails  = 0u;    //累计失败次数
 
 static int     reg_write(uint8_t reg, uint8_t value);
 static uint8_t reg_read(uint8_t reg, int *pStatus);
@@ -34,30 +52,18 @@ void App_MPU6050_Init(void)
 {
 	uint8_t cfg_ok;
 
-	//1.初始化 MPU6050 的 I2C2 总线（PB10/PB11），先开时钟
-	RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C2,ENABLE);
-	RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB,ENABLE);
-	
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
-	
-	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_10 | GPIO_Pin_11;
-	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF_OD;
-	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
-	
-	GPIO_Init(GPIOB,&GPIO_InitStruct);
-	
-	I2C_InitTypeDef I2C_InitStruct = {0};
-	
-	I2C_InitStruct.I2C_ClockSpeed = 400000;
-	I2C_InitStruct.I2C_DutyCycle = I2C_DutyCycle_2;
-	I2C_InitStruct.I2C_Mode  = I2C_Mode_I2C;
-	I2C_InitStruct.I2C_OwnAddress1 = 0x00;//主机自身地址，作为主机时随便填
-	I2C_InitStruct.I2C_Ack = I2C_Ack_Enable;//必须使能应答，结构体清零后默认是关闭的
-	I2C_InitStruct.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit;
+	/* #1 把 MPU6050 挂到一条**软件（位拆）I2C** 上，引脚仍是 PB10/PB11。
+	 *
+	 * 为什么不用 STM32 的硬件 I2C2：那个外设的状态机非常难伺候 ——
+	 * 一旦被干扰打断就会锁存 AF/BUSY 之类的状态，必须靠「打时钟脉冲 + 复位外设」
+	 * 才能拉回来，而且每次拉回来没读几帧又失败。本项目实测就是这种表现。
+	 * 软件 I2C 完全用 GPIO + 延时打时序，出问题最多是这一次传输失败，
+	 * 下一个起始条件就重新来，不存在「外设卡住」这回事 —— 这正是我们想要的鲁棒性。
+	 *
+	 * 代价是 CPU 占用：一轮 14 字节读取约 18KB 个半周期，半周期 3us 时约 0.5ms，
+	 * 占 5ms 控制周期的 10%。可接受，但半周期别往小调（见 MPU6050_SI2C_HALF_US）。 */
+	My_SI2C_Init(&mpu_si2c);
 
-	I2C_Init(I2C2,&I2C_InitStruct);
-	
-	
 	//#2设置MPU6050的参数
 	//每一条都判返回值：任何一条没写进去，传感器就工作在错误的量程/滤波下，
 	//姿态角的量纲会整个错掉，而现象只是"车立不住"，很难反查到根因
@@ -106,27 +112,30 @@ void App_MPU6050_Update()
 	//
 	//读失败直接返回，让 ax..gz 保持上一次的值。绝不能拿 buf 去算：失败时 buf 是
 	//没被写过的栈垃圾，算出的姿态角会突然乱跳，平衡环能直接把车甩出去
-	if(My_I2C_RegReadBytes(I2C2, MPU6050_ADDR, 0x3b, buf, 14) != 0)
 	{
-		if(mpu_fail_cnt < 255u)
-		{
-			mpu_fail_cnt++;
-		}
+		int i2c_ret = My_SI2C_RegReadBytes(&mpu_si2c, MPU6050_ADDR, 0x3b, buf, 14);
 
-		//连续失败到限值后抢救一次总线（手工打时钟脉冲把从机冲回空闲），
-		//每隔 MPU6050_RECOVER_MS 毫秒试一次，读到一帧即清零停下
-		if(mpu_fail_cnt >= MPU6050_FAIL_LIMIT)
+		if(i2c_ret != 0)
 		{
-			uint32_t now = GetTick();
+			/* 软件 I2C 的失败码：
+			 *   -1 从机没应答地址   -> 模块掉电/接错，或线被拉住
+			 *   -2 数据/寄存器被拒  -> 传输中途被打断
+			 *   -3 从机把 SCL 拉死  -> 时钟延展超时，器件异常
+			 * 总线本身不需要抢救：软件 I2C 没有「外设卡死」这回事，
+			 * 下一个起始条件就是全新的时序。所以这里只记数、不再调 ResetBus，
+			 * 另外每次失败都补一个停止位把从机放回空闲 */
+			mpu_dbg_err = i2c_ret;
+			mpu_dbg_fails++;
 
-			if((uint32_t)(now - mpu_recover_ms) >= MPU6050_RECOVER_MS)
+			SI2C_ForceStop(&mpu_si2c);
+
+			if(mpu_fail_cnt < 255u)
 			{
-				mpu_recover_ms = now;
-				My_I2C_ResetBus(I2C2);
+				mpu_fail_cnt++;
 			}
-		}
 
-		return;
+			return;   /* 保持上一次的有效数据，不要拿栈垃圾去算姿态 */
+		}
 	}
 
 	mpu_fail_cnt = 0u;
@@ -220,9 +229,8 @@ static int reg_write(uint8_t reg, uint8_t value)
 {
 	uint8_t bytesToSend[] = {reg, value};
 
-	//两字节连写：寄存器地址 + 数据。这是 MPU6050 单寄存器写的标准做法，
-	//等价于 My_I2C_MemWriteBytes，但少一次函数跳转
-	return My_I2C_SendBytes(I2C2, 0xd0, bytesToSend, 2);
+	//两字节连写：寄存器地址 + 数据。这是 MPU6050 单寄存器写的标准做法
+	return My_SI2C_SendBytes(&mpu_si2c, MPU6050_ADDR, bytesToSend, 2);
 }
 
 //读取寄存器的值：reg 要读取的寄存器地址
@@ -235,7 +243,7 @@ static uint8_t reg_read(uint8_t reg, int *pStatus)
 
 	//读寄存器必须用"寄存器读"接口（内含重复起始）
 	//不能拆成先 SendBytes 再 ReceiveBytes，那样中间会多一个停止位
-	ret = My_I2C_RegReadBytes(I2C2, 0xd0, reg, &regValue, 1);
+	ret = My_SI2C_RegReadBytes(&mpu_si2c, MPU6050_ADDR, reg, &regValue, 1);
 
 	if(pStatus != 0)
 	{
@@ -254,6 +262,47 @@ static uint8_t mpu_whoami_ok(void)
 	uint8_t id     = reg_read(0x75, &status);
 
 	return ((status == 0) && (id == 0x68u)) ? 1u : 0u;
+}
+
+/* ===================== 诊断读数接口 =====================
+ * 把 I2C 失败的现场暴露给显示层，方便不接电脑也能看出是哪种失败。
+ * 参数都可以传 0，表示不关心那一项 */
+
+//累计失败次数与抢救次数
+void App_MPU6050_GetDiag(uint16_t *pFails, uint16_t *pResets, uint8_t *pBusHeld)
+{
+	if(pFails   != 0) { *pFails   = mpu_dbg_fails; }
+	/* 软件 I2C 没有「外设状态要抢救」这回事，这两个字段保留只为不改显示层接口 */
+	if(pResets  != 0) { *pResets  = 0u; }
+	if(pBusHeld != 0) { *pBusHeld = 0u; }
+}
+
+//最后一次失败的返回值
+void App_MPU6050_GetLastError(int *pErr, uint16_t *pSr1, uint16_t *pSr2)
+{
+	if(pErr != 0) { *pErr = mpu_dbg_err; }
+	/* 软件 I2C 没有 SR1/SR2 寄存器，恒返回 0 */
+	if(pSr1 != 0) { *pSr1 = 0u; }
+	if(pSr2 != 0) { *pSr2 = 0u; }
+}
+
+/* 把失败码翻译成一句人能读的话。
+ *
+ * 软件 I2C 的失败码就是 My_SI2C_* 的返回值，含义很直白：
+ *   -1 从机没应答地址    -> 模块掉电 / 接线松了 / 上拉缺失；先量模块 VCC
+ *   -2 数据或寄存器被拒  -> 传输中途被打断，通常是干扰或总线速率偏高
+ *   -3 从机把 SCL 拉死   -> 时钟延展超时，器件异常或线被短路
+ * 返回静态常量字符串，可直接拿去打印 */
+const char *App_MPU6050_DescribeError(void)
+{
+	switch(mpu_dbg_err)
+	{
+		case 0:  return "ok";
+		case -1: return "noACK:check pwr";
+		case -2: return "data NACK";
+		case -3: return "SCL stuck";
+		default: return "unknown err";
+	}
 }
 
 

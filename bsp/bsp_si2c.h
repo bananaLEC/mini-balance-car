@@ -19,6 +19,10 @@
 #define SI2C_ACK    1u   /* 主机拉低 SDA：应答，表示「还要继续读」 */
 #define SI2C_NACK   0u   /* 主机释放 SDA：非应答，表示「读完了」   */
 
+/* 从机把 SCL 拉住不放（时钟延展）超过上限时返回这个值。
+ * 与 SI2C_ACK/SI2C_NACK 区分开，调用方才能把它和「没人应答」分开处理 */
+#define SI2C_BUS_STUCK  0xFEu
+
 typedef struct
 {
 	GPIO_TypeDef *SCL_GPIOx;   /* SCL 所在端口，取 GPIOA..GPIOE */
@@ -28,9 +32,10 @@ typedef struct
 	uint16_t      SDA_GPIO_Pin;/* SDA 引脚   */
 
 	/* 半周期延时，单位 us。I2C 标准模式下总线速率约 100kHz，
-	 * 即半周期 5us；取 2~3us 对应约 150~250kHz，
-	 * 是本板 OLED 模块实测能稳定工作的范围。
-	 * 换更长的排线或换器件时把它调大即可，不用改代码逻辑 */
+	 * 即半周期 5us；取 2~3us 对应约 150~250kHz。
+	 * 这是实测能稳定工作的范围；换更长的排线或换器件时把它调大即可。
+	 * ⚠️ 这个值直接决定 CPU 占用：一轮 14 字节读取要 14*9 个半周期，
+	 *    5us 时约 1.3ms，2us 时约 0.5ms。控制周期只有 5ms，别调得太小 */
 	uint16_t      HalfPeriodUs;
 } SI2C_TypeDef;
 
@@ -52,7 +57,14 @@ int My_SI2C_ReceiveBytes(SI2C_TypeDef *SI2C, uint8_t Addr, uint8_t *pBuffer, uin
 int My_SI2C_RegReadBytes(SI2C_TypeDef *SI2C, uint8_t Addr, uint8_t Reg, uint8_t *pBuffer, uint16_t Size);
 
 /* 写从机某个寄存器的值
- * 返回值： 0 成功 / -1 寻址失败 / -2 寄存器号或数据被拒收 */
+ * 返回值： 0 成功 / -1 寻址失败 / -2 寄存器号或数据被拒收 / -3 从机把 SCL 拉死 */
 int My_SI2C_RegWriteBytes(SI2C_TypeDef *SI2C, uint8_t Addr, uint8_t Reg, const uint8_t *pData, uint16_t Size);
+
+/* 强制补一个停止位，把总线拉回空闲。
+ *
+ * 用途：一次传输因为干扰中途失败时，从机可能还停在「等后续字节」的状态，
+ * 补一个停止位让它复位，下一次传输就是干净的。
+ * 只发时序、不判应答，也不检查 SCL —— 所以它不会阻塞，任何地方都能调 */
+void SI2C_ForceStop(SI2C_TypeDef *SI2C);
 
 #endif

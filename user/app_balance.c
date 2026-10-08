@@ -94,6 +94,10 @@ static float   balance_stop_pitch  = 0.0f;
 /* 倾角第一次超过 BAL_MAX_ANGLE 的时刻，0 = 当前没超，配合 BAL_FALL_HOLD_MS 计时 */
 static uint32_t bal_fall_since_ms = 0u;
 
+/* 传感器失效期间的标记：1 = 上一拍因为读数失效被挡住。
+ * 数据回来后靠它决定要重新锚定时间与 PID，而不是直接接着算 */
+static uint8_t bal_sensor_lost = 0u;
+
 /* 机械中位，单位 度。上电取默认值，标定可用 App_Balance_SetCenterAngle() 改 */
 static float bal_center_angle = BAL_CENTER_ANGLE_DEFAULT;
 
@@ -170,6 +174,44 @@ void App_Balance_Disable(void)
 	App_Motor_Disable();
 }
 
+/* 传感器读数失效时的应急处理：切断电机输出，但**不退出平衡模式**。
+ *
+ * 为什么不直接 App_Balance_Disable()：
+ *   那样是「永久停机」，要人再按一次键才能重新开始，而车在这一刻已经失稳，
+ *   必然倒地。而 I2C 丢包往往是短暂的（干扰、总线需要抢救），
+ *   永久停机的代价远大于收益。
+ *
+ * 为什么必须切断输出：
+ *   姿态角有一部分是陀螺积分出来的，读数停更期间这个积分还在拿旧样本推进，
+ *   角度会越跑越偏。拿错数据驱动电机比停车危险得多，所以这一段宁可不动。
+ *
+ * 恢复：重新读到有效帧后由 App_Balance_ResumeAfterSensorLoss() 把时间基准和
+ * PID 历史重新锚定，然后再接着跑 —— 不重置的话，恢复瞬间的 dt 会是一大截。 */
+static void App_Balance_SensorLost(void)
+{
+	omega_ref = 0.0f;
+	App_Motor_SetTarget_L(0.0f);
+	App_Motor_SetTarget_R(0.0f);
+	App_Motor_Disable();
+
+	/* 记下停机原因，屏幕上的 RSN 仍然能看出来是传感器问题 */
+	balance_stop_reason = BAL_STOP_MPU;
+}
+
+//传感器恢复：重新锚定时间基准并清掉 PID 历史，避免恢复瞬间灌入一大步积分
+static void App_Balance_ResumeAfterSensorLoss(void)
+{
+	balance_last_us = GetUs();
+
+	PID_Reset(&pid_speed);
+	PID_Reset(&pid_angle);
+	PID_Reset(&pid_rate);
+
+	App_Motor_Enable();
+
+	balance_stop_reason = BAL_STOP_NONE;
+}
+
 //读取上一次自动停机的原因码，取值见 app_balance.h 里的 BAL_STOP_xxx
 uint8_t App_Balance_GetStopReason(void)
 {
@@ -210,12 +252,22 @@ void App_Balance_Update(void)
 		return;
 	}
 
-	//传感器数据失效（I2C 连续读失败）必须马上停机，否则就是拿错数据去驱动电机
+	//传感器数据失效（I2C 连续读失败）：切断电机输出，但保留平衡模式。
+	//读数回来就自动接着跑，不需要人再按一次键 —— 永久停机在车已经失稳的时候
+	//只会让车必然倒地，而 I2C 丢包通常是短暂的
 	if(App_MPU6050_IsOk() == 0u)
 	{
-		App_Balance_Disable();
-		balance_stop_reason = BAL_STOP_MPU;
+		App_Balance_SensorLost();
+		bal_sensor_lost = 1u;   // 记下：数据回来后要走恢复流程
 		return;
+	}
+
+	//上次是「传感器失效」挡住的：这一次数据回来了，重新锚定时间与 PID 再继续
+	if(bal_sensor_lost != 0u)
+	{
+		bal_sensor_lost = 0u;
+		App_Balance_ResumeAfterSensorLoss();
+		return;   //这一拍只做恢复，不参与控制，避免用刚重置的状态算一步
 	}
 
 	now = GetUs();

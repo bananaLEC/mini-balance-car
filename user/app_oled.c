@@ -75,8 +75,32 @@ static void Redraw(void)
 	Draw_Fix2(wref);
 	OLED_DrawString(&oled, "r/s");
 
+	/* 第 6 行：温度 + I2C 失败类型。
+	 * 失败类型一直显示（不只是停机时），这样现场就能看到是哪一种：
+	 *   表现为 RSN:2 时，要区分总线被拉死(BUSY)、从机不应答(AF)、
+	 *   还是纯粹等标志位超时 —— 三种的修法完全不同。
+	 * 字符串都控制在 21 个字符以内，128 像素一行的容量 */
 	Draw_Row(6);
-	OLED_Printf(&oled, "TMP:%+03dC", temp);
+	OLED_Printf(&oled, "TMP:%+03dC %s", temp, App_MPU6050_DescribeError());
+
+	/* 第 7 行：I2C 失败码与累计失败次数
+	 *   E<错误码> F<累计失败次数>
+	 * 软件 I2C 的错误码（bsp_si2c 的返回值）：
+	 *    0 还没失败过 / -1 从机没应答地址 / -2 数据被拒 / -3 从机拉死 SCL */
+	Draw_Row(7);
+	{
+		int      err = 0;
+		uint16_t sr1 = 0u;
+		uint16_t sr2 = 0u;
+		uint16_t fails = 0u;
+		uint16_t resets = 0u;
+		uint8_t  held = 0u;
+
+		App_MPU6050_GetLastError(&err, &sr1, &sr2);
+		App_MPU6050_GetDiag(&fails, &resets, &held);
+
+		OLED_Printf(&oled, "E%d F%u", err, (unsigned)fails);
+	}
 }
 
 void App_OLED_Init(void)

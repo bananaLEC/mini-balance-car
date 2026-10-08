@@ -32,8 +32,16 @@
 /* 总线抢救的半周期，约 100kHz。放慢一点保证从机跟得上 */
 #define I2C_RECOVER_HALF_US       (5u)
 
+/* 本板 I2C 总线的波特率。总线抢救后要重新 I2C_Init，必须和上层初始化用同一个值，
+ * 否则抢救完速率就变了。改这里要同步改 user/app_mpu6050.c 的 MPU6050_I2C_SPEED */
+#define I2C_SPEED_HZ              (100000u)
+
 /* 抢救时 SCL 脉冲个数：从机最多剩 8 位没吐完，多打一个确保冲干净 */
 #define I2C_RECOVER_PULSES        (9u)
+
+/* 上一次抢救之后两线是否仍被拉低。由 My_I2C_ResetBus 写，My_I2C_BusWasHeldLow 读。
+ * 它区分的是「软件能救的锁死」和「硬件被拉住」这两类完全不同的故障 */
+static uint8_t bus_held_low = 0u;
 
 /* 抢救时用空转代替 DelayUs：不依赖延时模块，任何上下文都能用 */
 #define I2C_RECOVER_SPIN_LOOPS    (72u)
@@ -543,6 +551,49 @@ static void I2C_RecoverDelay(void)
 	}
 }
 
+/* 开某条 I2C 总线的 APB1 时钟。复位与恢复都要用到 */
+static void I2C_EnableClock(I2C_TypeDef *I2Cx)
+{
+	if(I2Cx == I2C1)
+	{
+		RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C1, ENABLE);
+	}
+	else if(I2Cx == I2C2)
+	{
+		RCC_APB1PeriphClockCmd(RCC_APB1Periph_I2C2, ENABLE);
+	}
+}
+
+/* 把外设恢复成「刚 I2C_Init 完、400kHz、开应答」的状态。
+ *
+ * 为什么必须做这一步：总线被拉住时，光把引脚切来切去救不回来。
+ * 外设自己的状态机、以及 SR1/SR2 里锁存的 AF/BUSY/BERR 不会因为引脚翻转而清掉；
+ * 只 I2C_Cmd(ENABLE) 的话，下一次传输会立刻又失败，变成
+ * 「一直失败 → 一直抢救 → 一直失败」的死循环，现象就是永远 BUSY。
+ * 真正的复位要走 RCC 的 APB1 外设复位（I2C_DeInit 干的就是这件事），
+ * 再重新 I2C_Init 把波特率等参数写回去。
+ *
+ * 注意 I2C_DeInit 需要有 APB1 时钟才能操作寄存器，所以先把时钟开上。 */
+static void I2C_ReinitPeripheral(I2C_TypeDef *I2Cx)
+{
+	I2C_InitTypeDef init;
+
+	I2C_EnableClock(I2Cx);
+
+	/* 真正的外设复位：所有寄存器回到复位值 */
+	I2C_DeInit(I2Cx);
+
+	init.I2C_Mode                = I2C_Mode_I2C;
+	init.I2C_DutyCycle           = I2C_DutyCycle_2;
+	init.I2C_OwnAddress1         = 0x00;
+	init.I2C_Ack                 = I2C_Ack_Enable;
+	init.I2C_AcknowledgedAddress = I2C_AcknowledgedAddress_7bit;
+	init.I2C_ClockSpeed          = I2C_SPEED_HZ;
+
+	I2C_Init(I2Cx, &init);
+	I2C_Cmd(I2Cx, ENABLE);
+}
+
 int My_I2C_ResetBus(I2C_TypeDef *I2Cx)
 {
 	const I2C_PinMap_t *map = I2C_FindPinMap(I2Cx);
@@ -554,8 +605,8 @@ int My_I2C_ResetBus(I2C_TypeDef *I2Cx)
 		return -1;   /* 不是本板已登记的 I2C 总线，不猜引脚 */
 	}
 
-	/* #1 关外设：状态机复位，两根线交回 GPIO 控制。
-	 * 波特率、应答设置等寄存器内容都还在，救完不用重新 I2C_Init */
+	/* #1 关外设：把两根线从外设手里拿回来交给 GPIO。
+	 * 后面第 3、4 步只用 GPIO 打时序，所以外设状态再乱也能把从机冲出来 */
 	I2C_Cmd(I2Cx, DISABLE);
 
 	/* #2 切成普通开漏输出，两根线都释放（高电平由外部上拉提供） */
@@ -568,7 +619,11 @@ int My_I2C_ResetBus(I2C_TypeDef *I2Cx)
 
 	I2C_RecoverDelay();
 
-	/* #3 打 9 个时钟脉冲。从机最多还剩 8 位没吐完，多打一个确保它走完 */
+	/* #3 打时钟脉冲，直到从机把 SDA 放开。
+	 *
+	 * 每个高电平后面都**回读 SCL**：如果从机在做时钟延展（把 SCL 拉住不放），
+	 * 光发脉冲是没用的，必须先等它松手。这里不无限等，最多打 9 个脉冲就收工，
+	 * 而且用 I2C_RecoverHalfPeriod() 里的循环上限兜底。 */
 	for(i = 0u; i < (uint32_t)I2C_RECOVER_PULSES; i++)
 	{
 		GPIO_ResetBits(map->GPIOx, map->SCL_Pin);
@@ -576,6 +631,12 @@ int My_I2C_ResetBus(I2C_TypeDef *I2Cx)
 
 		GPIO_SetBits(map->GPIOx, map->SCL_Pin);
 		I2C_RecoverDelay();
+
+		/* SDA 已经被从机放开（读到高）就不用再打了 */
+		if(GPIO_ReadInputDataBit(map->GPIOx, map->SDA_Pin) == Bit_SET)
+		{
+			break;
+		}
 	}
 
 	/* #4 补一个停止位：SCL 为高时把 SDA 由低拉高，把总线带回明确的空闲态 */
@@ -585,11 +646,39 @@ int My_I2C_ResetBus(I2C_TypeDef *I2Cx)
 	GPIO_SetBits(map->GPIOx, map->SDA_Pin);
 	I2C_RecoverDelay();
 
-	/* #5 交还 I2C 外设 */
+	/* #5 判断总线到底有没有真的松开。
+	 * 这一步是给「软件救不回来」的情况定性用的：
+	 *   SCL 或 SDA 仍然被拉在低电平 -> 是硬件层面被拉住（从机掉电/复位/器件坏/
+	 *     走线短路），打时钟脉冲和复位外设都没用，只能查供电与接线。
+	 *   两线都回到高 -> 总线空闲了，接下来重新初始化外设即可。
+	 * 把这个结论记下来，屏幕上的 E%04X 里能看到（SR2 的 bit0=MSL bit1=BUSY）。 */
+	bus_held_low = 0u;
+
+	if(GPIO_ReadInputDataBit(map->GPIOx, map->SCL_Pin) == Bit_RESET)
+	{
+		bus_held_low = 1u;
+	}
+
+	if(GPIO_ReadInputDataBit(map->GPIOx, map->SDA_Pin) == Bit_RESET)
+	{
+		bus_held_low = 1u;
+	}
+
+	/* #6 引脚交还外设，并做一次真正的外设复位 + 重新初始化。
+	 * 必须真复位：只 I2C_Cmd(ENABLE) 的话，SR1/SR2 里锁存的 AF/BUSY 还在，
+	 * 下一次传输会立刻又失败，变成「一直失败一直救不回来」的死循环 */
 	gpio.GPIO_Mode = GPIO_Mode_AF_OD;
 	GPIO_Init(map->GPIOx, &gpio);
 
-	I2C_Cmd(I2Cx, ENABLE);
+	I2C_ReinitPeripheral(I2Cx);
 
 	return 0;
+}
+
+/* 上一次抢救之后，两线是否仍然被拉在低电平。
+ * 1 = 硬件层面被拉住（软件救不了，要查供电/接线/器件）
+ * 0 = 总线已松开 */
+uint8_t My_I2C_BusWasHeldLow(void)
+{
+	return bus_held_low;
 }
