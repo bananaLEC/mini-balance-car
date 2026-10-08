@@ -1,0 +1,51 @@
+本仓库中包含的 STMicroelectronics 代码不适用根目录的 MIT 许可证
+===============================================================================
+
+根目录的 `LICENSE`（MIT）只覆盖本项目作者编写的部分（`user/` `test/` `bsp/`
+`my_lib/` `tools/` `docs/`）。下面这些目录与文件是 STMicroelectronics 的代码，
+版权归 STMicroelectronics 所有，按 **MCD-ST Liberty SW License Agreement V2**
+（ST 官方文档编号 **SLA0044 Rev5 / February 2018**）授权。
+
+涉及范围
+-------------------------------------------------------------------------------
+
+    std_periph_driver/inc/          STM32F10x 标准外设库头文件 + ARM CMSIS Cortex-M3 头文件
+    std_periph_driver/src/          STM32F10x 标准外设库源文件（V3.6.2）
+    std_periph_driver/LICENSE.txt   本组件根目录下的许可全文
+    startup/                        各容量型号的启动汇编文件
+    user/system_stm32f10x.c/.h      系统时钟配置
+    user/stm32f10x_it.c/.h          中断向量与默认中断服务函数
+    user/stm32f10x_conf.h           外设库配置文件
+
+快速识别方式：这些文件头部的注释块中带有
+`Copyright (c) 2011-2012 STMicroelectronics. All rights reserved.`
+
+许可全文
+-------------------------------------------------------------------------------
+
+    LICENSES/MCD-ST-Liberty-SW-License-V2.txt     规范副本（覆盖本仓库全部 ST 衍生文件）
+    std_periph_driver/LICENSE.txt                 同一文本，对应库文件头中
+                                                  「本组件根目录下的 LICENSE 文件」这一指向
+
+两份文本逐字一致，取自 ST 官方发布的 SLA0044 Rev5，未作任何改动。
+
+使用条件摘要
+-------------------------------------------------------------------------------
+
+- 允许在 ST 微控制器上使用与再分发（源码或二进制），**必须保留版权声明、
+  条件列表与免责声明**（许可正文第 10、11 条）。
+- **第 3 条**：不得使用 ST 的名义为衍生产品背书。
+- **第 4 条**：本软件只能在 ST 的微控制器上使用或执行。
+- **第 5 条（关键）**：不得以任何方式使**本软件**受制于开源条款，
+  并点名 GPL、EPL、Apache、BSD、MIT。
+
+  对实际做法的影响：**不能**在仓库根目录放一个声明覆盖「全部内容」的
+  MIT / BSD / Apache 许可证 —— 那会要求把 SPL 源码也按该开源许可证分发，
+  直接违反第 5 条。
+
+  本仓库的做法是**带范围限定的许可证**：根 `LICENSE` 正文第一段明确写出
+  只覆盖 `user/` `test/` `bsp/` `my_lib/` `tools/` `docs/`，并把 ST 部分
+  排除在外；ST 部分继续按 MCD-ST Liberty SW License V2 使用。
+  这样并未使 SPL 受制于开源条款，符合第 5 条。
+
+如需详细的权利状态梳理与可选方案，见 `THIRD_PARTY_NOTICES.md`。

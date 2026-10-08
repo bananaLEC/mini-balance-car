@@ -1,13 +1,17 @@
 # 迷你平衡车（STM32F103C8T6）
 
-> ⚠️ **发布前请先阅读 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**
->
-> 底层驱动为**本项目自研**（`bsp/`，依据公开数据手册独立实现）；硬件方案来自江协科技。
-> ST 标准外设库的许可禁止把本仓库置于 MIT / Apache 等开源条款之下，
-> 根目录**请勿**直接套用统一的开源许可证。
+> **许可证：MIT，但带范围限定。**
+> 根目录 [`LICENSE`](LICENSE) 只覆盖本项目作者编写的部分
+> （`user/` `test/` `bsp/` `my_lib/` `tools/` `docs/`）。
+> 仓库中的 STMicroelectronics 代码（`std_periph_driver/`、`startup/`、
+> `user/system_stm32f10x.*`、`user/stm32f10x_it.*`、`user/stm32f10x_conf.h`）
+> **不适用 MIT**，仍按 MCD-ST Liberty SW License V2 使用，
+> 见 [`LICENSE-ST-SPL`](LICENSE-ST-SPL)。
+> 细节与原因：[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 两轮自平衡小车的嵌入式固件。基于 STM32F103C8T6 + STM32F10x 标准外设库（SPL）
-开发，裸机周期任务调度，无 RTOS。
+开发，裸机周期任务调度，无 RTOS。底层驱动为**本项目自研**（`bsp/`，依据公开
+数据手册独立实现）；硬件方案来自江协科技。
 
 ---
 
@@ -153,29 +157,39 @@ pwsh -File tools\link.ps1      # 链接出 build\template.axf / .hex，并打印
 | 江协科技 | 平衡车控制板硬件方案 | 原理图版权归其所有，本仓库不包含原图 |
 | ~~铁头山羊（B 站）~~ | ~~`my_lib/` 下大部分底层驱动~~ | **已在本次重构中全部重写为 `bsp/` 下的自研实现，不再是第三方代码** |
 
-**本仓库仍未附加统一的开源许可证** —— 原因是 ST 的许可条款明确禁止使标准外设库
-受制于 MIT / BSD / Apache / GPL 等开源条款。注意这一条**不因驱动自研化而改变**。
-
 第三方许可原文随仓库提供：[`LICENSES/`](LICENSES/) 与 `std_periph_driver/LICENSE.txt`。
 
 ---
 
 ## 许可证
 
-⚠️ 本项目**当前未附加**统一的开源许可证。原先有两条独立的理由，驱动自研化之后
-第一条已经消除，第二条依然成立：
+本仓库采用**带范围限定的 MIT 许可证**：
 
-1. ~~仓库中相当一部分代码的著作权不属于本项目作者，作者无权代替原作者授权~~
-   → **已解决**：第三方驱动代码已全部重写为 `bsp/` 下的自研实现；
-2. **ST 的许可（SLA0044 Rev5）第 5 条明确禁止**使标准外设库受制于开源条款，
-   并点名了 GPL、EPL、Apache、BSD、MIT。在根目录放一个覆盖全部内容的 MIT
-   许可证会直接违反该条。**这条不因重构而消失。**
+| 部分 | 许可证 |
+|---|---|
+| `user/` `test/` `bsp/` `my_lib/` `tools/` `docs/`（本项目作者编写） | **MIT** — [`LICENSE`](LICENSE) |
+| `std_periph_driver/`、`startup/`、`user/system_stm32f10x.*`、`user/stm32f10x_it.*`、`user/stm32f10x_conf.h`（STMicroelectronics） | **MCD-ST Liberty SW License V2** — [`LICENSE-ST-SPL`](LICENSE-ST-SPL) |
 
-各部分完整的权利状态、第三方许可原文与可选方案：
+### 为什么 MIT 必须带范围限定
 
+**不能**在根目录放一个声明覆盖「全部内容」的 MIT 许可证。
+
+**ST 的许可（SLA0044 Rev5）第 5 条禁止**以任何方式使**标准外设库本身**受制于
+开源条款，并点名了 GPL、EPL、Apache、BSD、MIT。关键在「this software」指的是
+SPL 本身，所以：
+
+- 根目录放 MIT 并声明覆盖整个仓库 → ❌ 让 SPL 受制于 MIT，违反第 5 条
+- **根目录放 MIT，但正文明确限定只覆盖自有代码** → ✅ 本仓库的做法
+- 完全不加许可证 → ✅ 可行，但别人不知道能用什么
+
+早先本项目认为「仓库里有一部分代码的著作权不属于作者」，**那条理由已随本次重构
+消除**（第三方驱动已全部重写为自研实现）；上面这条 ST 的约束是**唯一仍然成立**的
+限制，且不因重构而消失。
+
+如果将来想整仓统一用 MIT，需要先去掉 ST 的 SPL —— 改用 **STM32CubeF1 HAL/LL**
+（BSD-3-Clause）或完全直接操作寄存器。
+
+各部分完整的权利状态与说明：
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - [`LICENSES/`](LICENSES/) — 第三方许可原文
 - `std_periph_driver/LICENSE.txt` — ST 标准外设库许可
-
-**本仓库当前为私有仓库。** 将来若需公开，注意旧提交历史里仍含重构前的第三方
-驱动源码，需要一并处理（见 `THIRD_PARTY_NOTICES.md` 第 5 节）。

@@ -1,0 +1,55 @@
+MIT License
+
+Copyright (c) 2026 bananaLEC
+
+===============================================================================
+适用范围（重要）
+===============================================================================
+
+本许可证**仅**适用于本仓库中由本项目作者编写的部分，即以下目录下的全部内容：
+
+    user/        应用层（平衡控制、姿态解算、电机、编码器、PWM、蓝牙、OLED 等）
+    bsp/         板级驱动层（SysTick 计时、串口、硬件 I2C、软件 I2C、SSD1306、字模）
+    my_lib/      周期任务调度、PID 控制器、按键驱动
+    test/        分模块台架测试
+    tools/       编译/链接验证脚本与字模生成脚本
+    docs/        设计文档
+
+**本许可证不适用于**以下第三方部分，它们各有自己的许可证，见
+`THIRD_PARTY_NOTICES.md`：
+
+    std_periph_driver/            STMicroelectronics STM32F10x 标准外设库 V3.6.2 + CMSIS
+    startup/                      STMicroelectronics 启动汇编文件
+    user/system_stm32f10x.c/.h    STMicroelectronics 系统时钟配置
+    user/stm32f10x_it.c/.h        STMicroelectronics 中断向量与默认中断服务函数
+    user/stm32f10x_conf.h         STMicroelectronics 外设库配置
+
+    上述 ST 部分按 **MCD-ST Liberty SW License Agreement V2**（SLA0044 Rev5）
+    授权，许可全文见 `LICENSES/MCD-ST-Liberty-SW-License-V2.txt`
+    与 `std_periph_driver/LICENSE.txt`。它们的版权归 STMicroelectronics 所有，
+    本项目的 MIT 许可证并未、也不能覆盖它们。
+
+    硬件方案（江协科技平衡车控制板 V2.0）的著作权归江协科技所有，
+    本仓库不包含其原理图原图。
+
+===============================================================================
+许可证正文
+===============================================================================
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

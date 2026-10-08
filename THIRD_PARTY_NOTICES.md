@@ -13,8 +13,10 @@
 > 重构所依据的文档清单、方案与验证方式见
 > [`docs/驱动重构方案.md`](docs/驱动重构方案.md) 与 [`bsp/README.md`](bsp/README.md)。
 
-> **重要**：本仓库**没有**附加覆盖全部内容的开源许可证。原因见文末
-> 「本仓库的许可证状态」。
+> **许可证**：本仓库采用**带范围限定的 MIT 许可证** —— 根目录 [`LICENSE`](LICENSE)
+> 只覆盖本项目作者编写的部分（`user/` `test/` `bsp/` `my_lib/` `tools/` `docs/`）；
+> ST 的代码不适用 MIT，仍按 MCD-ST Liberty SW License V2 使用，
+> 见 [`LICENSE-ST-SPL`](LICENSE-ST-SPL) 与第 4 节。
 
 ---
 
@@ -132,46 +134,51 @@ BSD、MIT。
 
 ## 4. 本仓库的许可证状态
 
-**本仓库当前未附加统一的开源许可证**，各部分权利状态如下：
+本仓库采用**带范围限定的许可证**：根目录 [`LICENSE`](LICENSE) 是 **MIT**，
+但正文第一段明确写出**只覆盖本项目作者编写的部分**，把 ST 的代码排除在外。
 
-| 部分 | 权利状态 |
-|---|---|
-| `user/`、`test/` | 本项目作者原创 |
-| `bsp/` | **本项目作者原创**（本次重构新写，依据公开数据手册独立实现） |
-| `my_lib/task.*`、`my_lib/pid.*`、`my_lib/button.*` | 本项目作者原创（作者在 AI 辅助下编写） |
-| `std_periph_driver/`、`startup/`、`user/system_stm32f10x.*`、`user/stm32f10x_it.*`、`user/stm32f10x_conf.h` | STMicroelectronics，MCD-ST Liberty SW License V2 |
-| 硬件方案 | 江协科技 |
+| 部分 | 权利状态 | 适用许可证 |
+|---|---|---|
+| `user/`、`test/`、`bsp/`、`my_lib/`、`tools/`、`docs/` | 本项目作者原创 | **MIT**（根目录 `LICENSE`） |
+| `std_periph_driver/`、`startup/`、`user/system_stm32f10x.*`、`user/stm32f10x_it.*`、`user/stm32f10x_conf.h` | STMicroelectronics | **MCD-ST Liberty SW License V2**（见 [`LICENSE-ST-SPL`](LICENSE-ST-SPL)） |
+| 硬件方案 | 江协科技 | 原理图著作权归其所有，本仓库不含原图 |
 
-### 如果要给仓库加许可证
+其中 `bsp/` 是本次重构新写的自研驱动，依据公开数据手册独立实现；
+`my_lib/` 只保留作者自己写的 `task` / `pid` / `button`。
 
-**不要在根目录放一个覆盖全部内容的 MIT / BSD / Apache 许可证。**
+### 为什么必须是「带范围限定」的许可证
 
-> 注意：本次重构**并没有**改变这个结论。原先有两条理由，第一条已经消除，
-> 第二条依然成立：
+**不能在根目录放一个声明覆盖「全部内容」的 MIT 许可证。**
+
+> 早先本项目记的理由有两条（代码权属不属于作者、以及 ST 许可第 5 条），
+> 其中**第一条已随本次重构消除**（第三方驱动已全部重写为自研实现），
+> 但**第二条依然成立，且是唯一的约束**：
 >
-> 1. ~~仓库中相当一部分代码的著作权不属于本项目作者~~ → **已解决**：
->    第三方驱动代码已全部重写为 `bsp/` 下的自研实现；
-> 2. **ST 许可第 5 条明确禁止**使 SPL 受制于开源条款，并点名了 MIT、BSD、
->    Apache、GPL —— 见第 1 节。**这条不因重构而消失。**
+> **ST 许可第 5 条**禁止以任何方式使 **SPL 本身**受制于开源条款，
+> 并点名了 GPL、EPL、Apache、BSD、MIT —— 见第 1 节。
+>
+> 关键在「this software」指的是 SPL。所以：
+>
+> | 做法 | 是否可行 |
+> |---|---|
+> | 根目录放 MIT，声明覆盖整个仓库 | ❌ 让 SPL 受制于 MIT，违反第 5 条 |
+> | **根目录放 MIT，但明确限定只覆盖自有代码** | ✅ **本仓库的做法** |
+> | 完全不加许可证 | ✅ 可行，但别人不知道能用什么 |
 
-可行方案（按推荐度排序）：
+### 如果将来想整仓统一用 MIT
 
-1. **【本项目当前选择】私有仓库 + 不附加统一许可证。** 私有仓库不构成对外传播，
-   版权风险最低；同时第三方许可原文已随仓库提供，权属关系清晰。
-2. **将来若要公开：仓库内容已全部为自有代码 + ST 标准外设库。** 可以把根许可证
-   限定为「仅覆盖本项目自有部分（`user/`、`test/`、`bsp/`、`my_lib/`）」，并
-   在许可证正文与 README 中明确**不含** `std_periph_driver/`、`startup/` 及
-   ST 衍生文件（这些仍按 MCD-ST Liberty SW License V2 使用）。
-   这种「限定范围的许可证」不构成对 SPL 施加开源条款，符合第 5 条。
-3. **公开时一并脱开 SPL**：改用 ST 官方的 **STM32CubeF1 HAL/LL**（BSD-3-Clause）
-   或直接写寄存器，就能整仓使用 MIT / Apache。代价是工作量较大。
+需要先把 ST 的 SPL 从仓库里去掉，可选：
+- 改用 ST 官方的 **STM32CubeF1 HAL/LL**（BSD-3-Clause）；
+- 或完全直接操作寄存器，不依赖任何 ST 库。
+
+代价是工作量较大，对当前这种以学习为目的的项目没有必要。
 
 ### 各部分的许可原文位置
 
 | 部分 | 许可原文 |
 |---|---|
-| STMicroelectronics | `LICENSES/MCD-ST-Liberty-SW-License-V2.txt`、`std_periph_driver/LICENSE.txt` |
-| 本项目作者原创部分（`bsp/`、`user/`、`test/`、`my_lib/`） | 无 —— 默认保留所有权利 |
+| 本项目作者原创部分（`bsp/`、`user/`、`test/`、`my_lib/`、`tools/`、`docs/`） | [`LICENSE`](LICENSE)（MIT） |
+| STMicroelectronics | [`LICENSE-ST-SPL`](LICENSE-ST-SPL)、`LICENSES/MCD-ST-Liberty-SW-License-V2.txt`、`std_periph_driver/LICENSE.txt` |
 
 ---
 
