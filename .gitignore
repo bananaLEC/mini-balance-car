@@ -15,6 +15,20 @@ DebugConfig/
 build/
 .probe/
 _old_drivers_reference/
+
+# --- 开发过程内部资料：不随仓库公开 ---
+# _dev_notes/ 放的是开发/调试期间的内部资料，例如独立复核报告、
+# 用来定位缺陷的一次性分析脚本。它们对使用者没有价值，
+# 且会暴露开发过程中的试错细节，所以不入库（本地仍保留可随时查阅）。
+_dev_notes/
+tools/_*
+tools/__pycache__/
+*.pyc
+
+# --- 一次性迁移脚本：已执行完毕，保留在本地即可 ---
+# update_uvprojx.ps1 把旧 my_lib 组换成 bsp 组，工程已经改完；
+# 别人若重跑会破坏自己的工程文件，所以不入库
+tools/update_uvprojx.ps1
 *.o
 *.d
 *.crf
